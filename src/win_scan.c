@@ -171,7 +171,7 @@ static DWORD WINAPI scan_thread(LPVOID param) {
     (void)param;
     for (;;) {
         win_scan_once();
-        int poll = g_settings.poll_ms > 500 ? g_settings.poll_ms : 5000;
+        int poll = g_settings.poll_ms >= 60000 ? g_settings.poll_ms : 7200000;
         DWORD w = WaitForSingleObject(g_trigger, (DWORD)poll);
         if (w == WAIT_OBJECT_0) ResetEvent(g_trigger);
     }

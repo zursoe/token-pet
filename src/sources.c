@@ -52,6 +52,17 @@ char *sources_cfg_get(const char *section, const char *tool) {
     return result;
 }
 
+void sources_cfg_add_extras(void *cfg) {
+    cJSON *root = load_root();
+    if (!root) return;
+    cJSON *ex = cJSON_GetObjectItemCaseSensitive(root, "wsl_extras");
+    if (ex && cJSON_IsArray(ex)) {
+        cJSON *dup = cJSON_Duplicate(ex, 1);
+        if (dup) cJSON_AddItemToObject((cJSON *)cfg, "extras", dup);
+    }
+    cJSON_Delete(root);
+}
+
 void sources_cfg_set(const char *section, const char *tool, const char *value) {
     cJSON *root = load_root();
     if (!root) return;

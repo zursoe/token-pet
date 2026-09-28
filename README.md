@@ -87,6 +87,16 @@ build\build.bat
   ```json
   { "win": { "codex": "D:\\custom\\.codex" }, "wsl": { "codex": "/home/me/.codex" } }
   ```
+- **远程镜像（可选）**：其他机器的 Agent 数据用 `tools/sync_remote_agents.sh` 拉取「过滤镜像」（节点在
+  `~/.config/tokenpet/sync_nodes.conf` 配置，参考 `tools/sync_nodes.example.conf`；`--check` 可预览计划）——
+  Codex/Kimi 只保留 token 事件行并剔除 base_instructions（约原始体积的 0.3%），Claude 只保留 usage/summary 行，
+  OpenCode 在远端用 sqlite3 精简导出（仅会话元数据 + assistant 消息）。支持多节点（含经 WSL 的 `/mnt/c` 读取
+  Windows 侧数据），然后在 `config\sources.json` 的 `wsl_extras` 登记，采集器每次扫描时自动读入，
+  面板「数据源」显示对应标签：
+  ```json
+  { "wsl_extras": [ { "tool": "codex", "path": "/home/me/agent-mirror/node1/.codex", "label": "远程 node1" } ] }
+  ```
+  跨机重复会话由全局去重键自动合并，不会重复计数
 - **境界表**：`config\realms.json`，修改后重启生效
 - **角色素材**：`assets\character\manifest.json` 控制模式（内程序绘制 / 序列帧），`tools\gen_assets.py` 可用生图 API 重新生成（密钥放在 `tools\pptoken.env`，不入库）
 
@@ -107,4 +117,4 @@ build\build.bat
 
 ## 版权
 
-私有项目，保留所有权利（All Rights Reserved）。未经许可请勿复制、分发或用于生产环境。
+本项目采用 **MIT License**（详见 [LICENSE](LICENSE)）。第三方组件许可见上节。

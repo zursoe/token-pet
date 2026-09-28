@@ -6,18 +6,17 @@
 #include "bridge.h"
 #include "sqlite3.h"
 
-#define PANEL_TIMER 7
-
 static HWND g_panel = NULL;
 static HWND g_tabs = NULL;
 static HWND g_list = NULL;
 static Db  *g_panel_db = NULL;
 static int  g_cur_tab = 0;
-static HWND g_btn_edit = NULL, g_btn_reset = NULL, g_btn_scan = NULL;
+static HWND g_btn_edit = NULL, g_btn_reset = NULL, g_btn_scan = NULL, g_btn_refresh = NULL;
 
 #define ID_BTN_EDIT  201
 #define ID_BTN_RESET 202
 #define ID_BTN_SCAN  203
+#define ID_BTN_REFRESH 204
 #define ID_DLG_EDIT  301
 #define ID_DLG_OK    302
 #define ID_DLG_CANCEL 303
@@ -243,6 +242,8 @@ static void exec_rows(Db *db, const char *sql, int cols, int *col_kinds, int n_c
 
 static void panel_fill(HWND h) {
     (void)h;
+    int keep_top = g_list ? ListView_GetTopIndex(g_list) : -1;
+    int keep_sel = g_list ? ListView_GetNextItem(g_list, -1, LVNI_SELECTED) : -1;
     setup_columns();
     if (!g_panel_db) return;
     switch (g_cur_tab) {
@@ -298,6 +299,14 @@ static void panel_fill(HWND h) {
         break;
     }
     }
+    /* restore scroll / selection after manual refresh */
+    int n = ListView_GetItemCount(g_list);
+    if (keep_sel >= 0 && keep_sel < n) {
+        ListView_SetItemState(g_list, keep_sel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+        ListView_EnsureVisible(g_list, keep_sel, FALSE);
+    } else if (keep_top > 0 && keep_top < n) {
+        ListView_EnsureVisible(g_list, keep_top, FALSE);
+    }
 }
 
 static LRESULT CALLBACK panel_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
@@ -321,8 +330,9 @@ static LRESULT CALLBACK panel_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                                       WS_CHILD | WS_VISIBLE, 130, 400, 110, 32, h, (HMENU)ID_BTN_RESET, NULL, NULL);
         g_btn_scan = CreateWindowExW(0, L"BUTTON", L"重新扫描全部",
                                      WS_CHILD | WS_VISIBLE, 246, 400, 140, 32, h, (HMENU)ID_BTN_SCAN, NULL, NULL);
+        g_btn_refresh = CreateWindowExW(0, L"BUTTON", L"刷新",
+                                        WS_CHILD | WS_VISIBLE, 396, 400, 90, 32, h, (HMENU)ID_BTN_REFRESH, NULL, NULL);
         ListView_SetExtendedListViewStyle(g_list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_GRIDLINES);
-        SetTimer(h, PANEL_TIMER, 5000, NULL);
         return 0;
     }
     case WM_SIZE: {
@@ -335,12 +345,14 @@ static LRESULT CALLBACK panel_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         MoveWindow(g_btn_edit, 14, hh - btn_h - 12, 110, btn_h, TRUE);
         MoveWindow(g_btn_reset, 130, hh - btn_h - 12, 110, btn_h, TRUE);
         MoveWindow(g_btn_scan, 246, hh - btn_h - 12, 140, btn_h, TRUE);
+        MoveWindow(g_btn_refresh, 396, hh - btn_h - 12, 90, btn_h, TRUE);
         MoveWindow(g_list, 14, top, w - 28, hh - top - btn_h - 20, TRUE);
         return 0;
     }
     case WM_COMMAND: {
         int id = LOWORD(wp);
         if (id == ID_BTN_EDIT) open_edit_dialog(h);
+        else if (id == ID_BTN_REFRESH) panel_fill(h);
         else if (id == ID_BTN_RESET) reset_selected(h);
         else if (id == ID_BTN_SCAN) {
             if (MessageBoxW(h, L"将清空本地统计并从所有数据源重新扫描，确认？", L"Token-Pet",
@@ -361,14 +373,10 @@ static LRESULT CALLBACK panel_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         }
         return 0;
     }
-    case WM_TIMER:
-        if (wp == PANEL_TIMER) panel_fill(h);
-        return 0;
     case WM_CLOSE:
         DestroyWindow(h);
         return 0;
     case WM_DESTROY:
-        KillTimer(h, PANEL_TIMER);
         g_panel = NULL;
         g_tabs = NULL;
         g_list = NULL;

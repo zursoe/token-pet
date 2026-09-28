@@ -1,12 +1,90 @@
 {
-  "mode": "sprites",
-  "canvas": [512, 680],
-  "anchor": "bottom-center",
-  "frames": {
-    "stand": "frames/stand.png",
-    "blink": "frames/blink.png",
-    "meditate": "frames/meditate.png",
-    "sword": "frames/sword.png",
-    "breakthrough": "frames/breakthrough.png"
+  "mode": "anim2",
+  "canvas": [
+    512,
+    680
+  ],
+  "actions": {
+    "idle": {
+      "frames": [
+        "anim/idle/f_00.png"
+      ],
+      "fps": 2.0,
+      "loop": true
+    },
+    "meditate": {
+      "frames": [
+        "anim/meditate/f_00.png"
+      ],
+      "fps": 2.0,
+      "loop": true
+    },
+    "sword": {
+      "frames": [
+        "anim/sword/f_00.png"
+      ],
+      "fps": 2.0,
+      "loop": true
+    },
+    "blink": {
+      "frames": [
+        "anim/blink/f_00.png",
+        "anim/blink/f_01.png"
+      ],
+      "fps": 7.0,
+      "loop": false,
+      "next": "idle"
+    },
+    "meditate_in": {
+      "frames": [
+        "anim/meditate_in/f_00.png",
+        "anim/meditate_in/f_01.png",
+        "anim/meditate_in/f_02.png"
+      ],
+      "fps": 5.0,
+      "loop": false,
+      "next": "meditate"
+    },
+    "meditate_out": {
+      "frames": [
+        "anim/meditate_out/f_00.png",
+        "anim/meditate_out/f_01.png",
+        "anim/meditate_out/f_02.png"
+      ],
+      "fps": 7.0,
+      "loop": false,
+      "next": "idle"
+    },
+    "sword_in": {
+      "frames": [
+        "anim/sword_in/f_00.png",
+        "anim/sword_in/f_01.png",
+        "anim/sword_in/f_02.png"
+      ],
+      "fps": 5.0,
+      "loop": false,
+      "next": "sword"
+    },
+    "sword_out": {
+      "frames": [
+        "anim/sword_out/f_00.png",
+        "anim/sword_out/f_01.png",
+        "anim/sword_out/f_02.png"
+      ],
+      "fps": 7.0,
+      "loop": false,
+      "next": "idle"
+    },
+    "breakthrough": {
+      "frames": [
+        "anim/breakthrough/f_00.png",
+        "anim/breakthrough/f_01.png",
+        "anim/breakthrough/f_02.png",
+        "anim/breakthrough/f_03.png"
+      ],
+      "fps": 6.0,
+      "loop": false,
+      "next": "idle"
+    }
   }
 }

@@ -68,9 +68,11 @@ static void dispatch_line(const char *line) {
             const char *tool = (cJSON_GetObjectItem(it, "tool") && cJSON_GetObjectItem(it, "tool")->valuestring) ? cJSON_GetObjectItem(it, "tool")->valuestring : NULL;
             const char *path = (cJSON_GetObjectItem(it, "path") && cJSON_GetObjectItem(it, "path")->valuestring) ? cJSON_GetObjectItem(it, "path")->valuestring : NULL;
             cJSON *ex = cJSON_GetObjectItem(it, "exists");
+            cJSON *jl = cJSON_GetObjectItem(it, "label");
             if (!tool || !path) continue;
-            char label[96];
-            snprintf(label, sizeof(label), "WSL %ls", g_distro);
+            char label[128];
+            if (jl && jl->valuestring) snprintf(label, sizeof(label), "%s", jl->valuestring);
+            else snprintf(label, sizeof(label), "WSL %ls", g_distro);
             db_source_upsert(g_db, tool, label, path, "WSL", "auto", (ex && cJSON_IsTrue(ex)) ? 1 : 0,
                              (ex && cJSON_IsTrue(ex)) ? "ok" : "missing");
         }
@@ -91,7 +93,7 @@ static void dispatch_line(const char *line) {
 static bool write_config_line(HANDLE stdin_w) {
     cJSON *cfg = cJSON_CreateObject();
     cJSON_AddStringToObject(cfg, "t", "config");
-    cJSON_AddNumberToObject(cfg, "poll_ms", g_settings.poll_ms > 500 ? g_settings.poll_ms : 2500);
+    cJSON_AddNumberToObject(cfg, "poll_ms", g_settings.poll_ms >= 60000 ? g_settings.poll_ms : 7200000);
     char *ov;
     ov = sources_cfg_get("wsl", "opencode");
     cJSON_AddStringToObject(cfg, "opencode_db", ov ? ov : "");
@@ -102,6 +104,7 @@ static bool write_config_line(HANDLE stdin_w) {
     ov = sources_cfg_get("wsl", "kimi");
     cJSON_AddStringToObject(cfg, "kimi_dir", ov ? ov : "");
     free(ov);
+    sources_cfg_add_extras(cfg);
     bool reset = InterlockedExchange(&g_reset_pending, 0) != 0;
     cJSON_AddBoolToObject(cfg, "reset_cursors", reset);
     char *s = cJSON_PrintUnformatted(cfg);

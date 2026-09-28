@@ -9,7 +9,12 @@ static volatile int g_reset_cursors = 0;
 static char g_opencode_db[1024] = "";
 static char g_codex_dir[1024] = "";
 static char g_kimi_dir[1024] = "";
-static int g_poll_ms = 2500;
+static int g_poll_ms = 7200000;
+
+#define MAX_EXTRAS 32
+typedef struct { char tool[32]; char path[1024]; char label[128]; } ExtraSrc;
+static ExtraSrc g_extras[MAX_EXTRAS];
+static int g_extras_n = 0;
 static long long g_emitted = 0;
 
 long long g_scan_work = 0;
@@ -50,6 +55,15 @@ void emit_paths(void) {
         cJSON_AddStringToObject(it, "path", items[i].path);
         cJSON_AddBoolToObject(it, "exists",
                               tp_file_exists(items[i].path) || tp_dir_exists(items[i].path));
+        cJSON_AddItemToArray(arr, it);
+    }
+    for (int i = 0; i < g_extras_n; i++) {
+        cJSON *it = cJSON_CreateObject();
+        cJSON_AddStringToObject(it, "tool", g_extras[i].tool);
+        cJSON_AddStringToObject(it, "path", g_extras[i].path);
+        cJSON_AddStringToObject(it, "label", g_extras[i].label);
+        cJSON_AddBoolToObject(it, "exists",
+                              tp_file_exists(g_extras[i].path) || tp_dir_exists(g_extras[i].path));
         cJSON_AddItemToArray(arr, it);
     }
     out_json(o);
@@ -112,7 +126,7 @@ static void apply_config(const char *line) {
     if (!d) return;
     cJSON *j;
     pthread_mutex_lock(&g_cfg_lock);
-    if ((j = cJSON_GetObjectItemCaseSensitive(d, "poll_ms")) && j->valueint > 300)
+    if ((j = cJSON_GetObjectItemCaseSensitive(d, "poll_ms")) && j->valueint >= 60000)
         g_poll_ms = j->valueint;
     if ((j = cJSON_GetObjectItemCaseSensitive(d, "opencode_db")) && j->valuestring && j->valuestring[0])
         snprintf(g_opencode_db, sizeof(g_opencode_db), "%s", j->valuestring);
@@ -122,6 +136,23 @@ static void apply_config(const char *line) {
         snprintf(g_kimi_dir, sizeof(g_kimi_dir), "%s", j->valuestring);
     if ((j = cJSON_GetObjectItemCaseSensitive(d, "reset_cursors")) && cJSON_IsTrue(j))
         g_reset_cursors = 1;
+    cJSON *ex = cJSON_GetObjectItemCaseSensitive(d, "extras");
+    if (ex && cJSON_IsArray(ex)) {
+        g_extras_n = 0;
+        cJSON *it = NULL;
+        cJSON_ArrayForEach(it, ex) {
+            if (g_extras_n >= MAX_EXTRAS) break;
+            cJSON *jt = cJSON_GetObjectItemCaseSensitive(it, "tool");
+            cJSON *jp = cJSON_GetObjectItemCaseSensitive(it, "path");
+            cJSON *jl = cJSON_GetObjectItemCaseSensitive(it, "label");
+            if (!jt || !jt->valuestring || !jp || !jp->valuestring) continue;
+            ExtraSrc *e = &g_extras[g_extras_n++];
+            snprintf(e->tool, sizeof(e->tool), "%s", jt->valuestring);
+            snprintf(e->path, sizeof(e->path), "%s", jp->valuestring);
+            if (jl && jl->valuestring) snprintf(e->label, sizeof(e->label), "%s", jl->valuestring);
+            else snprintf(e->label, sizeof(e->label), "%s", jp->valuestring);
+        }
+    }
     pthread_mutex_unlock(&g_cfg_lock);
     cJSON_Delete(d);
 }
@@ -206,6 +237,16 @@ int main(int argc, char **argv) {
         scan_opencode(odb, &cs, false);
         scan_codex(cdx, &cs, false);
         scan_kimi(kim, &cs, false);
+        for (int i = 0; i < g_extras_n; i++) {
+            ExtraSrc e;
+            pthread_mutex_lock(&g_cfg_lock);
+            e = g_extras[i];
+            pthread_mutex_unlock(&g_cfg_lock);
+            if (strcmp(e.tool, "codex") == 0) scan_codex(e.path, &cs, false);
+            else if (strcmp(e.tool, "opencode") == 0) scan_opencode(e.path, &cs, false);
+            else if (strcmp(e.tool, "kimi") == 0) scan_kimi(e.path, &cs, false);
+            else if (strcmp(e.tool, "claude") == 0) scan_claude(e.path, &cs);
+        }
         emit_done(true);
 
         if (once) break;

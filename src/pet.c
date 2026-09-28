@@ -30,6 +30,7 @@ extern void panel_open(HWND parent, Db *db);
 #define IDI_TOKENPET      101
 #define IDM_AUTOSTART     1006
 #define IDM_RESCAN_ALL    1007
+#define IDM_PREVIEW_ANIM  1008
 #define IDM_EXIT          1099
 
 static HWND     g_hwnd = NULL;
@@ -218,6 +219,9 @@ static void pet_menu_command(int id) {
     case IDM_SCAN_NOW:
         win_scan_trigger();
         break;
+    case IDM_PREVIEW_ANIM:
+        anim_next_action();
+        break;
     case IDM_RESCAN_ALL:
         if (MessageBoxW(g_hwnd, L"将清空本地统计并从所有数据源重新扫描，确认？", L"Token-Pet",
                         MB_YESNO | MB_ICONWARNING) == IDYES) {
@@ -244,6 +248,7 @@ static void pet_show_menu(POINT pt) {
     AppendMenuW(m, MF_STRING, IDM_RESET_SCALE, L"恢复 100% 缩放");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING, IDM_SCAN_NOW, L"立即扫描数据");
+    AppendMenuW(m, MF_STRING, IDM_PREVIEW_ANIM, L"预览动作");
     AppendMenuW(m, MF_STRING, IDM_RESCAN_ALL, L"重新扫描全部（清空重建）");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING, IDM_EXIT, L"退出");

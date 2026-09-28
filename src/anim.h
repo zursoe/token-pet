@@ -58,6 +58,9 @@ HICON anim_make_icon(int size);
 
 void anim_format_big(char *out, size_t cap, int64_t v);
 
+/* debug/preview: jump to the next action (anim2 mode) */
+void anim_next_action(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -239,7 +239,7 @@ void tp_settings_load(void) {
     memset(&g_settings, 0, sizeof(g_settings));
     g_settings.scale = 1.0f;
     g_settings.topmost = true;
-    g_settings.poll_ms = 5000;
+    g_settings.poll_ms = 7200000;
     g_settings.collector_enabled = true;
     wcsncpy(g_settings.wsl_distro, L"Debian", 63);
 
@@ -259,7 +259,8 @@ void tp_settings_load(void) {
     if ((p = strstr(txt, "\"topmost\""))) g_settings.topmost = strstr(p, "true") && (strstr(p, "true") < p + 20);
     if ((p = strstr(txt, "\"click_through\""))) g_settings.click_through = strstr(p, "true") && (strstr(p, "true") < p + 30);
     if ((p = strstr(txt, "\"autostart\""))) g_settings.autostart = strstr(p, "true") && (strstr(p, "true") < p + 20);
-    if ((p = strstr(txt, "\"poll_ms\""))) g_settings.poll_ms = (int)tp_parse_i64(p + 9, 5000);
+    if ((p = strstr(txt, "\"poll_ms\""))) g_settings.poll_ms = (int)tp_parse_i64(p + 9, 7200000);
+    if (g_settings.poll_ms < 60000) g_settings.poll_ms = 7200000; /* migrate old realtime setting */
     if ((p = strstr(txt, "\"collector_enabled\""))) g_settings.collector_enabled = strstr(p, "true") && (strstr(p, "true") < p + 30);
     if ((p = strstr(txt, "\"wsl_distro\""))) {
         const char *q = strchr(p + 12, '"');

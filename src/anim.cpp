@@ -11,6 +11,13 @@ using namespace Gdiplus;
 static Image *g_sprites[5] = { NULL, NULL, NULL, NULL, NULL };
 static bool g_sprite_mode = false;
 
+/* v2 action-sequence engine */
+static void a2_load(const wchar_t *dir, cJSON *actions);
+static void a2_start(const char *name, bool fade);
+static void a2_update(float dt);
+static void a2_draw(Graphics &g, PetAnim *a);
+static bool a2_has(const char *name);
+
 extern "C" void anim_load_sprites(const wchar_t *dir) {
     if (!dir || !dir[0]) return;
     wchar_t manifest[TP_PATH_MAX];
@@ -34,7 +41,10 @@ extern "C" void anim_load_sprites(const wchar_t *dir) {
     if (!root) return;
     cJSON *mode = cJSON_GetObjectItem(root, "mode");
     cJSON *frames = cJSON_GetObjectItem(root, "frames");
-    if (mode && mode->valuestring && strcmp(mode->valuestring, "sprites") == 0 && frames) {
+    cJSON *actions = cJSON_GetObjectItem(root, "actions");
+    if (mode && mode->valuestring && strcmp(mode->valuestring, "anim2") == 0 && actions) {
+        a2_load(dir, actions);
+    } else if (mode && mode->valuestring && strcmp(mode->valuestring, "sprites") == 0 && frames) {
         const char *keys[5] = { "stand", "blink", "meditate", "sword", "breakthrough" };
         for (int i = 0; i < 5; i++) {
             cJSON *j = cJSON_GetObjectItem(frames, keys[i]);
@@ -56,6 +66,194 @@ extern "C" void anim_load_sprites(const wchar_t *dir) {
                g_sprites[3] != NULL, g_sprites[4] != NULL);
     }
     cJSON_Delete(root);
+}
+
+/* ================= v2 action-sequence engine ================= */
+
+#define A2_MAX_ACTIONS 12
+#define A2_MAX_FRAMES 12
+
+typedef struct {
+    char name[32];
+    Image *frames[A2_MAX_FRAMES];
+    int n;
+    float fps;
+    bool loop;
+    char next[32];
+} A2Action;
+
+static A2Action g_a2[A2_MAX_ACTIONS];
+static int g_a2_n = 0;
+static bool g_anim2 = false;
+static char g_a2_cur[32] = "idle";
+static char g_a2_prev[32] = "";
+static float g_a2_clock = 0;
+static float g_a2_fade = 0;
+static float g_a2_blink = 4.0f;
+static float g_a2_idle = 16.0f;
+static float g_a2_hold = 0;
+
+static A2Action *a2_find(const char *name) {
+    for (int i = 0; i < g_a2_n; i++)
+        if (strcmp(g_a2[i].name, name) == 0) return &g_a2[i];
+    return NULL;
+}
+
+static bool a2_has(const char *name) { return a2_find(name) != NULL; }
+
+static void a2_load(const wchar_t *dir, cJSON *actions) {
+    g_a2_n = 0;
+    cJSON *act = NULL;
+    cJSON_ArrayForEach(act, actions) {
+        if (g_a2_n >= A2_MAX_ACTIONS) break;
+        const char *name = act->string;
+        cJSON *jf = cJSON_GetObjectItem(act, "frames");
+        if (!name || !jf) continue;
+        A2Action *A = &g_a2[g_a2_n];
+        memset(A, 0, sizeof(*A));
+        snprintf(A->name, sizeof(A->name), "%s", name);
+        cJSON *jfps = cJSON_GetObjectItem(act, "fps");
+        A->fps = (jfps && jfps->valuedouble > 0.1) ? (float)jfps->valuedouble : 4.0f;
+        cJSON *jloop = cJSON_GetObjectItem(act, "loop");
+        A->loop = jloop && cJSON_IsTrue(jloop);
+        cJSON *jnext = cJSON_GetObjectItem(act, "next");
+        if (jnext && jnext->valuestring) snprintf(A->next, sizeof(A->next), "%s", jnext->valuestring);
+        int fn = cJSON_GetArraySize(jf);
+        for (int i = 0; i < fn && i < A2_MAX_FRAMES; i++) {
+            cJSON *fp = cJSON_GetArrayItem(jf, i);
+            if (!fp || !fp->valuestring) continue;
+            wchar_t *rel = tp_utf8_to_wide(fp->valuestring);
+            for (wchar_t *q = rel; *q; q++) if (*q == L'/') *q = L'\\';
+            wchar_t path[TP_PATH_MAX];
+            _snwprintf(path, TP_PATH_MAX, L"%s\\%s", dir, rel);
+            path[TP_PATH_MAX - 1] = 0;
+            free(rel);
+            Image *img = Image::FromFile(path);
+            if (img && img->GetLastStatus() == Ok) A->frames[A->n++] = img;
+            else if (img) delete img;
+        }
+        if (A->n > 0) g_a2_n++;
+    }
+    g_anim2 = g_a2_n > 0 && a2_find("idle") != NULL;
+    if (g_anim2) {
+        snprintf(g_a2_cur, sizeof(g_a2_cur), "idle");
+        g_a2_clock = 0;
+        g_a2_fade = 0;
+    }
+    tp_log("anim2: %s (%d actions)", g_anim2 ? "loaded" : "incomplete", g_a2_n);
+}
+
+static void a2_start(const char *name, bool fade) {
+    if (!a2_has(name)) return;
+    snprintf(g_a2_prev, sizeof(g_a2_prev), "%s", g_a2_cur);
+    snprintf(g_a2_cur, sizeof(g_a2_cur), "%s", name);
+    g_a2_clock = 0;
+    g_a2_fade = fade ? 0.28f : 0;
+}
+
+static void a2_update(float dt) {
+    if (!g_anim2) return;
+    A2Action *A = a2_find(g_a2_cur);
+    if (!A) { snprintf(g_a2_cur, sizeof(g_a2_cur), "idle"); g_a2_clock = 0; return; }
+    g_a2_clock += dt;
+    if (g_a2_fade > 0) g_a2_fade -= dt;
+
+    float dur = (float)A->n / A->fps;
+    if (g_a2_clock >= dur) {
+        if (A->loop) {
+            g_a2_clock = fmodf(g_a2_clock, dur);
+        } else {
+            const char *nx = A->next[0] ? A->next : "idle";
+            a2_start(nx, true);
+            return;
+        }
+    }
+
+    if (strcmp(g_a2_cur, "idle") == 0) {
+        g_a2_blink -= dt;
+        g_a2_idle -= dt;
+        if (g_a2_blink <= 0) {
+            g_a2_blink = 3.0f + (float)(rand() % 500) / 100.0f;
+            if (a2_has("blink")) a2_start("blink", true);
+        } else if (g_a2_idle <= 0) {
+            g_a2_idle = 26.0f + (float)(rand() % 2500) / 100.0f;
+            const char *pick = NULL;
+            if (a2_has("meditate_in") && a2_has("sword_in"))
+                pick = (rand() % 2) ? "meditate_in" : "sword_in";
+            else if (a2_has("meditate_in")) pick = "meditate_in";
+            else if (a2_has("sword_in")) pick = "sword_in";
+            if (pick) {
+                a2_start(pick, true);
+                g_a2_hold = 16.0f + (float)(rand() % 1800) / 100.0f;
+            }
+        }
+    } else if (strcmp(g_a2_cur, "meditate") == 0 || strcmp(g_a2_cur, "sword") == 0) {
+        g_a2_hold -= dt;
+        if (g_a2_hold <= 0) {
+            a2_start(strcmp(g_a2_cur, "meditate") == 0 ? "meditate_out" : "sword_out", true);
+            g_a2_idle = 18.0f + (float)(rand() % 2000) / 100.0f;
+        }
+    }
+}
+
+static void draw_image_alpha(Graphics &g, Image *img, REAL alpha) {
+    if (!img || alpha <= 0.01f) return;
+    RectF dst(45.0f, 48.0f, 210.0f, 279.0f);
+    if (alpha > 0.99f) {
+        g.DrawImage(img, dst, 0.0f, 0.0f, (REAL)img->GetWidth(), (REAL)img->GetHeight(), UnitPixel);
+        return;
+    }
+    ColorMatrix cm = { {
+        1, 0, 0, 0, 0,
+        0, 1, 0, 0, 0,
+        0, 0, 1, 0, 0,
+        0, 0, 0, alpha, 0,
+        0, 0, 0, 0, 1
+    } };
+    ImageAttributes attrs;
+    attrs.SetColorMatrix(&cm, ColorMatrixFlagsDefault, ColorAdjustTypeBitmap);
+    g.DrawImage(img, dst, 0.0f, 0.0f, (REAL)img->GetWidth(), (REAL)img->GetHeight(),
+                UnitPixel, &attrs);
+}
+
+static void a2_draw_idx(Graphics &g, A2Action *A, int idx, REAL alpha) {
+    if (!A || A->n == 0) return;
+    if (idx < 0) idx = 0;
+    if (idx >= A->n) idx = A->n - 1;
+    draw_image_alpha(g, A->frames[idx], alpha);
+}
+
+static void a2_draw(Graphics &g, PetAnim *a) {
+    float t = a->t;
+    float extra = 0;
+    if (strcmp(g_a2_cur, "sword") == 0 || strcmp(g_a2_cur, "sword_in") == 0 ||
+        strcmp(g_a2_cur, "sword_out") == 0)
+        extra = sinf(t * 1.1f) * 4.0f;
+    else if (strcmp(g_a2_cur, "meditate") == 0)
+        extra = sinf(t * 1.2f) * 2.5f;
+    if (extra != 0) g.TranslateTransform(0.0f, extra, MatrixOrderAppend);
+
+    A2Action *A = a2_find(g_a2_cur);
+    int idx = A ? (int)(g_a2_clock * A->fps) : 0;
+    if (g_a2_fade > 0 && g_a2_prev[0]) {
+        float k = g_a2_fade / 0.28f;
+        A2Action *P = a2_find(g_a2_prev);
+        if (P) a2_draw_idx(g, P, P->n - 1, k);
+        a2_draw_idx(g, A, idx, 1.0f - k);
+    } else {
+        a2_draw_idx(g, A, idx, 1.0f);
+    }
+}
+
+extern "C" void anim_next_action(void) {
+    if (!g_anim2) return;
+    if (strcmp(g_a2_cur, "idle") == 0) a2_start("meditate_in", true);
+    else if (strcmp(g_a2_cur, "meditate_in") == 0 || strcmp(g_a2_cur, "meditate") == 0)
+        a2_start("sword_in", true);
+    else if (strcmp(g_a2_cur, "sword_in") == 0 || strcmp(g_a2_cur, "sword") == 0)
+        a2_start("breakthrough", true);
+    else a2_start("idle", true);
+    g_a2_hold = 12.0f;
 }
 
 static void draw_sprite_pose(Graphics &g, PetAnim *a) {
@@ -333,7 +531,9 @@ extern "C" void anim_draw_surface(void *bits, int w, int h, float page_scale, Pe
     float body_squash = meditating ? 0.82f : 1.0f;
     float head_dy = meditating ? 14.0f : 0;
 
-    if (g_sprite_mode) {
+    if (g_anim2) {
+        a2_draw(g, a);
+    } else if (g_sprite_mode) {
         draw_sprite_pose(g, a);
     } else {
     /* sword */
@@ -466,6 +666,7 @@ extern "C" void anim_pulse_gain(PetAnim *a, float strength) {
 
 extern "C" void anim_trigger_breakthrough(PetAnim *a) {
     a->breakthrough = 1.0f;
+    if (g_anim2) a2_start("breakthrough", true);
 }
 
 extern "C" void anim_add_popup(PetAnim *a, int64_t delta) {
@@ -499,6 +700,7 @@ extern "C" void anim_format_big(char *out, size_t cap, int64_t v) {
 
 extern "C" void anim_update(PetAnim *a, float dt) {
     a->t += dt;
+    if (g_anim2) a2_update(dt);
 
     a->blink_timer -= dt;
     if (a->blink_timer <= 0) {

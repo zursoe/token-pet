@@ -1,0 +1,12 @@
+{
+  "mode": "sprites",
+  "canvas": [512, 680],
+  "anchor": "bottom-center",
+  "frames": {
+    "stand": "frames/stand.png",
+    "blink": "frames/blink.png",
+    "meditate": "frames/meditate.png",
+    "sword": "frames/sword.png",
+    "breakthrough": "frames/breakthrough.png"
+  }
+}

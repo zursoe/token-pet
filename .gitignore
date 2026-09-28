@@ -1,0 +1,26 @@
+# ---- 构建产物 ----
+build/*
+!build/build.bat
+*.res
+*.obj
+*.exe
+wsl-collector/pet-collector
+
+# ---- 运行时数据 ----
+data/
+config/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# ---- 本地密钥与调试脚本 ----
+tools/pptoken.env
+tools/*.ps1
+
+# ---- 素材原始大图（仅保留处理后的 frames） ----
+assets/character/raw/
+
+# ---- 杂项 ----
+__pycache__/
+*.pyc

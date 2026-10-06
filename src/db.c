@@ -16,6 +16,42 @@ static int exec_sql(sqlite3 *db, const char *sql) {
     return rc;
 }
 
+static void src_of_key(const char *key, char *out, size_t cap) {
+    if (!key || !key[0]) { snprintf(out, cap, ""); return; }
+    if (strncmp(key, "ccr:", 4) == 0) snprintf(out, cap, "ccr");
+    else if (strncmp(key, "ccp:", 4) == 0) snprintf(out, cap, "ccp");
+    else snprintf(out, cap, "%.2s", key);
+}
+
+/* one-time materialization of items into the per-day aggregate table */
+static void agg_backfill(sqlite3 *db) {
+    sqlite3_stmt *st = NULL;
+    bool done = false;
+    if (sqlite3_prepare_v2(db, "SELECT value FROM state WHERE key='agg_v1'", -1, &st, NULL) == SQLITE_OK) {
+        if (sqlite3_step(st) == SQLITE_ROW) done = true;
+        sqlite3_finalize(st);
+    }
+    if (done) return;
+    int64_t t0 = tp_now_ms();
+    exec_sql(db, "BEGIN;");
+    int rc = exec_sql(db,
+        "INSERT INTO items_agg(day,tool,sid,src,cnt,tin,tout,tr,cr,cw,last_ts)"
+        " SELECT date(ts/1000,'unixepoch','localtime'), tool, sid,"
+        " CASE WHEN key LIKE 'ccr:%' THEN 'ccr' WHEN key LIKE 'ccp:%' THEN 'ccp'"
+        "      ELSE substr(key,1,2) END,"
+        " COUNT(*), SUM(tin), SUM(tout), SUM(tr), SUM(cr), SUM(cw), MAX(ts)"
+        " FROM items GROUP BY 1,2,3,4;");
+    if (rc == SQLITE_OK) {
+        exec_sql(db, "DELETE FROM state WHERE key='agg_v1';"
+                     "INSERT INTO state(key,value) VALUES('agg_v1','1');"
+                     "COMMIT;");
+        tp_log("db: items_agg backfilled in %lld ms", (long long)(tp_now_ms() - t0));
+    } else {
+        exec_sql(db, "ROLLBACK;");
+        tp_log("db: items_agg backfill failed, will retry next start");
+    }
+}
+
 Db *db_open(const wchar_t *path) {
     Db *d = (Db *)xp_alloc(sizeof(Db));
     InitializeCriticalSection(&d->cs);
@@ -39,6 +75,7 @@ Db *db_open(const wchar_t *path) {
         " cr INTEGER DEFAULT 0, cw INTEGER DEFAULT 0, cost REAL DEFAULT 0);"
         "CREATE INDEX IF NOT EXISTS idx_items_tool_ts ON items(tool, ts);"
         "CREATE INDEX IF NOT EXISTS idx_items_tool_sid ON items(tool, sid);"
+        "CREATE INDEX IF NOT EXISTS idx_items_ts ON items(ts);"
         "CREATE TABLE IF NOT EXISTS meta("
         " tool TEXT, sid TEXT, title TEXT, model TEXT, provider TEXT, dir TEXT, updated INTEGER,"
         " PRIMARY KEY(tool, sid));"
@@ -51,7 +88,13 @@ Db *db_open(const wchar_t *path) {
         "CREATE TABLE IF NOT EXISTS sync_log("
         " id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, tool TEXT, location TEXT,"
         " added_items INTEGER, added_xp INTEGER, note TEXT);"
+        "CREATE TABLE IF NOT EXISTS items_agg("
+        " day TEXT, tool TEXT, sid TEXT, src TEXT, cnt INTEGER DEFAULT 0,"
+        " tin INTEGER DEFAULT 0, tout INTEGER DEFAULT 0, tr INTEGER DEFAULT 0,"
+        " cr INTEGER DEFAULT 0, cw INTEGER DEFAULT 0, last_ts INTEGER DEFAULT 0,"
+        " PRIMARY KEY(day, tool, sid, src)) WITHOUT ROWID;"
     );
+    agg_backfill(d->db);
     return d;
 }
 
@@ -135,6 +178,36 @@ int64_t db_upsert_item(Db *d, const char *key, const char *tool, const char *sid
             sqlite3_bind_double(st, 7, cost);
             sqlite3_step(st);
             sqlite3_finalize(st);
+        }
+    }
+
+    int64_t d_tin = n_tin - o_tin, d_tout = n_tout - o_tout, d_tr = n_tr - o_tr;
+    int64_t d_cr = n_cr - o_cr, d_cw = n_cw - o_cw;
+    if (d_tin || d_tout || d_tr || d_cr || d_cw) {
+        sqlite3_stmt *ag = NULL;
+        if (sqlite3_prepare_v2(d->db,
+                "INSERT INTO items_agg(day,tool,sid,src,cnt,tin,tout,tr,cr,cw,last_ts)"
+                " VALUES(date(?1/1000,'unixepoch','localtime'),?2,?3,?4,?5,?6,?7,?8,?9,?10,?1)"
+                " ON CONFLICT(day,tool,sid,src) DO UPDATE SET"
+                " cnt=cnt+excluded.cnt,"
+                " tin=tin+excluded.tin, tout=tout+excluded.tout, tr=tr+excluded.tr,"
+                " cr=cr+excluded.cr, cw=cw+excluded.cw,"
+                " last_ts=CASE WHEN excluded.last_ts>last_ts THEN excluded.last_ts ELSE last_ts END",
+                -1, &ag, NULL) == SQLITE_OK) {
+            char src[8];
+            src_of_key(key, src, sizeof(src));
+            sqlite3_bind_int64(ag, 1, ts);
+            sqlite3_bind_text(ag, 2, tool, -1, SQLITE_STATIC);
+            sqlite3_bind_text(ag, 3, sid ? sid : "", -1, SQLITE_STATIC);
+            sqlite3_bind_text(ag, 4, src, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int64(ag, 5, exists ? 0 : 1);
+            sqlite3_bind_int64(ag, 6, d_tin);
+            sqlite3_bind_int64(ag, 7, d_tout);
+            sqlite3_bind_int64(ag, 8, d_tr);
+            sqlite3_bind_int64(ag, 9, d_cr);
+            sqlite3_bind_int64(ag, 10, d_cw);
+            sqlite3_step(ag);
+            sqlite3_finalize(ag);
         }
     }
     db_unlock(d);
@@ -348,7 +421,7 @@ void db_state_set(Db *d, const char *key, const char *value) {
 }
 
 void db_reset_items(Db *d) {
-    db_exec(d, "DELETE FROM items; DELETE FROM sync_files; DELETE FROM meta;");
+    db_exec(d, "DELETE FROM items; DELETE FROM items_agg; DELETE FROM sync_files; DELETE FROM meta;");
 }
 
 void *db_raw(Db *d) {

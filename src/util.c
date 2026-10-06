@@ -42,6 +42,25 @@ int64_t tp_now_ms(void) {
     return (int64_t)(u.QuadPart / 10000ULL) - 11644473600000LL;
 }
 
+int tp_dpi_for_window(HWND hwnd) {
+    typedef UINT (WINAPI *GetDpiForWindowFn)(HWND);
+    static GetDpiForWindowFn fn = NULL;
+    static bool tried = false;
+    if (!tried) {
+        HMODULE user32 = GetModuleHandleW(L"user32.dll");
+        if (user32) fn = (GetDpiForWindowFn)(void *)GetProcAddress(user32, "GetDpiForWindow");
+        tried = true;
+    }
+    if (fn && hwnd) {
+        UINT d = fn(hwnd);
+        if (d > 0) return (int)d;
+    }
+    HDC dc = hwnd ? GetDC(hwnd) : NULL;
+    int dpi = dc ? GetDeviceCaps(dc, LOGPIXELSY) : 96;
+    if (dc) ReleaseDC(hwnd, dc);
+    return dpi > 0 ? dpi : 96;
+}
+
 wchar_t *tp_utf8_to_wide(const char *s) {
     if (!s) return NULL;
     int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0);

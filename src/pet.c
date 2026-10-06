@@ -4,6 +4,7 @@
 #include "realm.h"
 #include "win_scan.h"
 #include "bridge.h"
+#include "pricing.h"
 #include <math.h>
 
 extern int scan_report_run(void);
@@ -434,7 +435,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show) {
     {
         INITCOMMONCONTROLSEX icc;
         icc.dwSize = sizeof(icc);
-        icc.dwICC = ICC_LISTVIEW_CLASSES | ICC_TAB_CLASSES | ICC_BAR_CLASSES;
+        icc.dwICC = ICC_LISTVIEW_CLASSES | ICC_TAB_CLASSES | ICC_BAR_CLASSES | ICC_DATE_CLASSES;
         InitCommonControlsEx(&icc);
     }
 
@@ -529,6 +530,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show) {
 
         g_db = db_open(db_path);
         if (g_db) {
+            pricing_load(cfg_dir);
+            db_lock(g_db);
+            pricing_register(db_raw(g_db));
+            db_unlock(g_db);
             realm_load(&g_realm, cfg_dir);
             g_xp = db_total_xp(g_db);
             g_today = db_today_xp(g_db);

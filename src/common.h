@@ -18,7 +18,7 @@
 #define TP_APP_CLASS   L"TokenPetWindowClass"
 #define TP_PANEL_CLASS L"TokenPetPanelClass"
 #define TP_MUTEX_NAME  L"TokenPet_SingleInstance_9f3c"
-#define TP_VERSION     L"0.1.0"
+#define TP_VERSION     L"0.4.0"
 
 /* max lengths */
 #define TP_PATH_MAX 1024
@@ -35,6 +35,10 @@ char  *xp_strdup(const char *s);
 wchar_t *xp_wcsdup(const wchar_t *s);
 
 int64_t tp_now_ms(void);
+
+/* DPI of the monitor that hosts hwnd (96 = 100%) */
+int tp_dpi_for_window(HWND hwnd);
+#define TP_SCALE(v, dpi) MulDiv((v), (dpi), 96)
 
 /* UTF-8 <-> UTF-16 */
 wchar_t *tp_utf8_to_wide(const char *s);
